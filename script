@@ -10,8 +10,7 @@ nom_feuille = "LB3"
 wb = op.load_workbook(nom_fichier)
 ws = wb[nom_feuille]
 
-# Liste des machines extraites
-machines = []
+machines = []  # Liste finale des machines extraites
 
 # === FONCTIONS UTILITAIRES ===
 
@@ -41,7 +40,7 @@ def nettoyer(val):
     return ""
 
 def normaliser(texte):
-    """Supprime les accents, met en minuscule et nettoie."""
+    """Supprime les accents et met en minuscule."""
     texte = texte.lower().strip()
     texte = unicodedata.normalize("NFKD", texte).encode("ASCII", "ignore").decode("utf-8")
     return texte
@@ -116,7 +115,7 @@ def Etage(val):
 
 # === EXTRACTION DES MACHINES ===
 
-prefixe_baie = ""  # Laisser vide si les baies n’ont pas de préfixe spécifique
+prefixe_baie = ""  # Laisser vide si toutes les baies sont listées directement
 constructeurs = ["Cisco", "HP", "Dell", "Juniper", "Fortinet", "Palo Alto"]
 modeles = ["C9300", "DL380", "EX4300", "FG60", "PA-220"]
 
@@ -183,10 +182,26 @@ for machine in machines:
     machine["NOM_DU_SITE"] = nom_site
     machine["LT"] = nom_feuille
 
-# === AFFICHAGE DU RÉSULTAT FINAL ===
+# === TRI DES MACHINES PAR POSITION V ===
+
+def key_tri(machine):
+    """Convertit la position V en nombre si possible pour tri croissant."""
+    try:
+        return int(machine["POSITION V"])
+    except (TypeError, ValueError):
+        return float("inf")  # Les valeurs non numériques vont à la fin
+
+machines.sort(key=key_tri)
+
+# === AFFICHAGE FINAL DANS L’ORDRE ===
 
 for m in machines:
-    if m["CONSTRUCTEUR"] == "Inconnu":
-        print(f"\033[91mBaie:\033[0m {m['BAIE']} \033[91m{m['POSITION V']}\033[0m : aucune correspondance\n")
-    else:
-        print(m, "\n")
+    print(
+        f"[{m['POSITION V']}] "
+        f"Baie: {m['BAIE']} | "
+        f"Constructeur: {m['CONSTRUCTEUR']} | "
+        f"Modèle: {m['MODELE']} | "
+        f"Sens: {m['SENS INSTALLATION']} | "
+        f"Bâtiment: {m['BATIMENT']} | "
+        f"Étage: {m['ETAGE']}"
+    )
