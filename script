@@ -1,0 +1,194 @@
+import openpyxl as op
+import difflib
+import unicodedata
+
+# === Paramètres ===
+nom_fichier = '.xlsx'
+nom_feuille = 'LB3'
+
+wb = op.load_workbook(nom_fichier)
+ws = wb[nom_feuille]
+
+machines = []
+
+# === Fonctions utilitaires ===
+
+def ajout_machine():
+    return {
+        'NOM_DU_SITE': None,
+        'BATIMENT': None,
+        'ETAGE': None,
+        'LT': None,
+        'BAIE': None,
+        'CONSTRUCTEUR': None,
+        'MODELE': None,
+        'SENS INSTALLATION': None,
+        'ETIQUETTE': None,
+        'POSITION V': None,
+        'POSITION H': None,
+        'SN': None,
+        'CAB': None,
+        'REMARQUE': None
+    }
+
+def nettoyer(val):
+    if val:
+        return str(val).strip().replace("\n", "").replace("\r", "").lower()
+    return ""
+
+def normaliser(texte):
+    texte = texte.lower().strip()
+    texte = unicodedata.normalize("NFKD", texte).encode("ASCII", "ignore").decode("utf-8")
+    return texte
+
+def extraire_modele_depuis_prefixe(texte, liste_prefixes):
+    mots = normaliser(texte).split()
+    for i, mot in enumerate(mots):
+        for prefixe in liste_prefixes:
+            if normaliser(mot).startswith(normaliser(prefixe)):
+                # On récupère tous les mots à partir du mot qui commence par le préfixe
+                return " ".join(mots[i:])
+    return "vide"
+
+def detecter_approx(texte, liste_mots, seuil=0.8):
+    texte_normalise = normaliser(texte)
+    mots = texte_normalise.split()
+    liste_normalisee = [normaliser(m) for m in liste_mots]
+    for mot in mots:
+        match = difflib.get_close_matches(mot, liste_normalisee, n=1, cutoff=seuil)
+        if match:
+            return match[0]
+    return "vide"
+
+def est_entierement_vide(valeur):
+    if valeur is None:
+        return True
+    lignes = str(valeur).strip().split("\n")
+    return all(l.strip().lower() == "vide" for l in lignes)
+
+def Nom_site(val):
+    parts = val.split("_")
+    for mot in parts:
+        if mot and len(mot) > 1 and mot[0].isupper() and mot[1].islower():
+            nom_site = mot
+            for machine in machines:
+                machine["NOM_DU_SITE"] = nom_site
+
+def Etage(val):
+    val = nettoyer(val).upper()
+    correspondances = {
+        "RDC": "RDC",
+        "1": "R+1",
+        "2": "R+2",
+        "3": "R+3",
+        "R+1": "R+1",
+        "R+2": "R+2",
+        "R+3": "R+3"
+    }
+    return correspondances.get(val, f"Étage inconnu ({val})")
+
+def chercher_valeur_apres_libelle(libelle):
+    libelle_nettoye = nettoyer(libelle)
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column):
+            val = ws.cell(row=i, column=j).value
+            if nettoyer(val) == libelle_nettoye:
+                return ws.cell(row=i, column=j + 1).value
+    return None
+
+def remplir_champ_depuis_colonne(champ_excel, champ_machine, transformer=None):
+    mot_cle_nettoye = nettoyer(champ_excel)
+    for j in range(1, ws.max_column + 1):
+        val = ws.cell(row=1, column=j).value
+        if nettoyer(val) == mot_cle_nettoye:
+            for i, machine in enumerate(machines):
+                ligne_excel = i + 2
+                valeur = ws.cell(row=ligne_excel, column=j).value
+                machine[champ_machine.upper()] = transformer(valeur) if transformer else valeur
+            return
+    print(f"Colonne '{champ_excel}' non trouvée.")
+
+def detecter_colonnes_par_prefixe(prefixe):
+    prefixe_nettoye = nettoyer(prefixe)
+    colonnes = []
+    for j in range(1, ws.max_column + 1):
+        val = ws.cell(row=1, column=j).value
+        if val and nettoyer(val).startswith(prefixe_nettoye):
+            colonnes.append(j)
+    return colonnes
+
+# === Création des machines depuis toutes les baies ===
+
+prefixe_baie = ""
+constructeurs = [""]
+modeles = ['']
+
+colonnes_baie = detecter_colonnes_par_prefixe(prefixe_baie)
+
+positions_par_contenu = {}
+
+for col_baie in colonnes_baie:
+    nom_baie = ws.cell(row=1, column=col_baie).value
+
+    for i in range(2, ws.max_row + 1):
+        val_baie = ws.cell(row=i, column=col_baie).value
+        position = ws.cell(row=i, column=col_baie - 1).value
+        sens_installation = ws.cell(row=i, column=col_baie + 1).value
+
+        if not val_baie or not str(val_baie).strip():
+            continue
+
+        texte = str(val_baie).strip()
+        if texte not in positions_par_contenu:
+            positions_par_contenu[texte] = []
+
+        positions_par_contenu[texte].append(position)
+
+for contenu, positions in positions_par_contenu.items():
+    constructeur = detecter_approx(contenu, constructeurs)
+    modele = extraire_modele_depuis_prefixe(contenu, modeles)
+
+    for pos in positions:
+        if constructeur == "":
+            constructeur = ""
+        machine = ajout_machine()
+        machine["POSITION V"] = pos
+        machine["SENS INSTALLATION"] = sens_installation
+        machine["BAIE"] = nom_baie
+        machine["CONSTRUCTEUR"] = constructeur
+        machine["MODELE"] = modele
+        machines.append(machine)
+
+# === Remplissage des champs communs ===
+
+val_bat = chercher_valeur_apres_libelle("batiment")
+val_etage = chercher_valeur_apres_libelle("etage")
+
+if val_bat:
+    for machine in machines:
+        machine["BATIMENT"] = val_bat
+else:
+    remplir_champ_depuis_colonne("batiment", "BATIMENT")
+
+if val_etage:
+    for machine in machines:
+        machine["ETAGE"] = Etage(val_etage)
+else:
+    remplir_champ_depuis_colonne("etage", "ETAGE", transformer=Etage)
+
+# === Ajout du nom de feuille et du site ===
+
+for machine in machines:
+    machine["LT"] = nom_feuille
+
+Nom_site(nom_fichier)
+
+# === Affichage du résultat ===
+
+for m in machines:
+    position = m["POSITION V"]
+    if m["CONSTRUCTEUR"] == "vide":
+        if position is not None:
+            print(f"\033[91mBaie:\033[0m {m['BAIE']} \033[91m{position}\033[0m : vide\n")
+    else:
+        print(m, "\n")
