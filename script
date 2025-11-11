@@ -4,13 +4,13 @@ import unicodedata
 import os
 
 # === PARAMÈTRES ===
-nom_fichier = "LB3_SiteX.xlsx"  # <-- à adapter selon ton fichier
+nom_fichier = "LB3_SiteX.xlsx"  # <-- à adapter
 nom_feuille = "LB3"
 
 wb = op.load_workbook(nom_fichier)
 ws = wb[nom_feuille]
 
-machines = []  # Liste finale des machines extraites
+machines = []  # Liste finale
 
 # === FONCTIONS UTILITAIRES ===
 
@@ -34,19 +34,16 @@ def ajout_machine():
     }
 
 def nettoyer(val):
-    """Nettoie une valeur texte brute."""
     if val:
         return str(val).strip().replace("\n", "").replace("\r", "").lower()
     return ""
 
 def normaliser(texte):
-    """Supprime les accents et met en minuscule."""
     texte = texte.lower().strip()
     texte = unicodedata.normalize("NFKD", texte).encode("ASCII", "ignore").decode("utf-8")
     return texte
 
 def detecter_approx(texte, liste_mots, seuil=0.8):
-    """Renvoie une correspondance approximative d’un mot dans une liste."""
     if not texte:
         return None
     texte_normalise = normaliser(texte)
@@ -59,7 +56,6 @@ def detecter_approx(texte, liste_mots, seuil=0.8):
     return None
 
 def extraire_modele_depuis_prefixe(texte, liste_prefixes):
-    """Extrait un modèle si le texte contient un mot commençant par un préfixe."""
     if not texte:
         return None
     mots = normaliser(texte).split()
@@ -70,7 +66,6 @@ def extraire_modele_depuis_prefixe(texte, liste_prefixes):
     return None
 
 def chercher_valeur_apres_libelle(libelle):
-    """Cherche une valeur située juste après un libellé dans le tableau."""
     libelle_nettoye = nettoyer(libelle)
     for i in range(1, ws.max_row + 1):
         for j in range(1, ws.max_column):
@@ -79,31 +74,7 @@ def chercher_valeur_apres_libelle(libelle):
                 return ws.cell(row=i, column=j + 1).value
     return None
 
-def remplir_champ_depuis_colonne(champ_excel, champ_machine, transformer=None):
-    """Remplit un champ machine à partir d’une colonne Excel."""
-    mot_cle_nettoye = nettoyer(champ_excel)
-    for j in range(1, ws.max_column + 1):
-        val = ws.cell(row=1, column=j).value
-        if nettoyer(val) == mot_cle_nettoye:
-            for i, machine in enumerate(machines):
-                ligne_excel = i + 2
-                valeur = ws.cell(row=ligne_excel, column=j).value
-                machine[champ_machine.upper()] = transformer(valeur) if transformer else valeur
-            return
-    print(f"[⚠] Colonne '{champ_excel}' non trouvée.")
-
-def detecter_colonnes_par_prefixe(prefixe):
-    """Renvoie les numéros de colonnes dont l’en-tête commence par le préfixe donné."""
-    prefixe_nettoye = nettoyer(prefixe)
-    colonnes = []
-    for j in range(1, ws.max_column + 1):
-        val = ws.cell(row=1, column=j).value
-        if val and nettoyer(val).startswith(prefixe_nettoye):
-            colonnes.append(j)
-    return colonnes
-
 def Etage(val):
-    """Convertit la valeur brute d’étage en notation standard."""
     val = nettoyer(val).upper()
     correspondances = {
         "RDC": "RDC",
@@ -113,87 +84,57 @@ def Etage(val):
     }
     return correspondances.get(val, f"Étage inconnu ({val})")
 
-# === EXTRACTION DES MACHINES ===
+# === PARAMÈTRES DE RECHERCHE ===
 
-prefixe_baie = ""  # Laisser vide si toutes les baies sont listées directement
 constructeurs = ["Cisco", "HP", "Dell", "Juniper", "Fortinet", "Palo Alto"]
 modeles = ["C9300", "DL380", "EX4300", "FG60", "PA-220"]
 
-colonnes_baie = detecter_colonnes_par_prefixe(prefixe_baie)
-positions_par_contenu = {}
+# === EXTRACTION DES MACHINES ===
 
-for col_baie in colonnes_baie:
-    nom_baie = ws.cell(row=1, column=col_baie).value
+for j in range(1, ws.max_column + 1):
+    nom_baie = ws.cell(row=1, column=j).value
+    if not nom_baie:
+        continue
 
     for i in range(2, ws.max_row + 1):
-        val_baie = ws.cell(row=i, column=col_baie).value
-        position = ws.cell(row=i, column=col_baie - 1).value
-        sens_installation = ws.cell(row=i, column=col_baie + 1).value
+        val_baie = ws.cell(row=i, column=j).value
+        position = ws.cell(row=i, column=j - 1).value if j > 1 else None
+        sens_installation = ws.cell(row=i, column=j + 1).value if j < ws.max_column else None
 
-        if not val_baie or not str(val_baie).strip():
-            continue
+        texte = str(val_baie).strip() if val_baie else ""
+        constructeur = detecter_approx(texte, constructeurs) or "vide"
+        modele = extraire_modele_depuis_prefixe(texte, modeles) or "vide"
 
-        texte = str(val_baie).strip()
-        if texte not in positions_par_contenu:
-            positions_par_contenu[texte] = []
-
-        positions_par_contenu[texte].append({
-            "position": position,
-            "baie": nom_baie,
-            "sens": sens_installation
-        })
-
-# === CONSTRUCTION DES MACHINES ===
-
-for contenu, infos in positions_par_contenu.items():
-    constructeur = detecter_approx(contenu, constructeurs)
-    modele = extraire_modele_depuis_prefixe(contenu, modeles)
-
-    for info in infos:
         machine = ajout_machine()
-        machine["POSITION V"] = info["position"]
-        machine["SENS INSTALLATION"] = info["sens"]
-        machine["BAIE"] = info["baie"]
-        machine["CONSTRUCTEUR"] = constructeur or "Inconnu"
-        machine["MODELE"] = modele or "Non identifié"
+        machine["BAIE"] = nom_baie
+        machine["POSITION V"] = position
+        machine["SENS INSTALLATION"] = sens_installation
+        machine["CONSTRUCTEUR"] = constructeur
+        machine["MODELE"] = modele
         machines.append(machine)
 
-# === REMPLISSAGE DES CHAMPS COMMUNS ===
+# === CHAMPS COMMUNS ===
 
 val_bat = chercher_valeur_apres_libelle("batiment")
 val_etage = chercher_valeur_apres_libelle("etage")
 
-if val_bat:
-    for machine in machines:
-        machine["BATIMENT"] = val_bat
-else:
-    remplir_champ_depuis_colonne("batiment", "BATIMENT")
-
-if val_etage:
-    for machine in machines:
-        machine["ETAGE"] = Etage(val_etage)
-else:
-    remplir_champ_depuis_colonne("etage", "ETAGE", transformer=Etage)
-
-# === AJOUT DU NOM DU SITE ET DE LA FEUILLE ===
-
-nom_site = os.path.splitext(os.path.basename(nom_fichier))[0]
 for machine in machines:
-    machine["NOM_DU_SITE"] = nom_site
+    machine["BATIMENT"] = val_bat or "Inconnu"
+    machine["ETAGE"] = Etage(val_etage) if val_etage else "Inconnu"
     machine["LT"] = nom_feuille
+    machine["NOM_DU_SITE"] = os.path.splitext(os.path.basename(nom_fichier))[0]
 
-# === TRI DES MACHINES PAR POSITION V ===
+# === TRI PAR POSITION V ===
 
 def key_tri(machine):
-    """Convertit la position V en nombre si possible pour tri croissant."""
     try:
         return int(machine["POSITION V"])
     except (TypeError, ValueError):
-        return float("inf")  # Les valeurs non numériques vont à la fin
+        return float("inf")
 
 machines.sort(key=key_tri)
 
-# === AFFICHAGE FINAL DANS L’ORDRE ===
+# === AFFICHAGE FINAL ===
 
 for m in machines:
     print(
@@ -201,7 +142,5 @@ for m in machines:
         f"Baie: {m['BAIE']} | "
         f"Constructeur: {m['CONSTRUCTEUR']} | "
         f"Modèle: {m['MODELE']} | "
-        f"Sens: {m['SENS INSTALLATION']} | "
-        f"Bâtiment: {m['BATIMENT']} | "
-        f"Étage: {m['ETAGE']}"
+        f"Sens: {m['SENS INSTALLATION']}"
     )
